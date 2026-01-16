@@ -37,16 +37,29 @@ PROJECT ?= common
 OS ?= arch
 export BOARD ?= rpi4
 export ARCH ?= arm
-STAGES ?= __init__ os pikvm-repo pistat watchdog rootdelay no-bluetooth no-audit ro restore-mirrorlist ssh-keygen __cleanup__
+
+ifeq ($(BOARD), docker)
+	BUILD_STAGES ?= ro ssh-keygen
+else
+	BUILD_STAGES ?= pistat watchdog rootdelay no-bluetooth no-audit ro restore-mirrorlist ssh-keygen
+endif
+
+STAGES ?= __init__ os pikvm-repo $(BUILD_STAGES) __cleanup__
 BUILD_OPTS ?=
 
 HOSTNAME ?= pi
 LOCALE ?= en_US
 TIMEZONE ?= UTC
 
-export ARCH_DIST_REPO_URL ?= https://de3.mirror.archlinuxarm.org
-ARCH_PIKVM_REPO_URL ?= https://files.pikvm.org/repos/arch/
-ARCH_PIKVM_REPO_KEY ?= 912C773ABBD1B584
+export ARCH_DIST_REPO_URL ?=
+
+ifeq ($(BOARD), docker)
+	ARCH_PIKVM_REPO_URL ?=
+	ARCH_PIKVM_REPO_KEY ?=
+else
+	ARCH_PIKVM_REPO_URL ?= https://files.pikvm.org/repos/arch/
+	ARCH_PIKVM_REPO_KEY ?= 912C773ABBD1B584
+endif
 
 export RPIOS_IMAGES_URL ?= https://downloads.raspberrypi.com
 
@@ -158,7 +171,9 @@ toolbox: $(call contains,x86_64,$(__HOST_ARCH),,base)
 	$(call say,"Toolbox image is ready")
 
 
-binfmt: _binfmt-host.$(__HOST_ARCH)
+binfmt:
+	if [ $(__HOST_ARCH) != $(ARCH) ]; then $(MAKE) _binfmt-host.$(__HOST_ARCH); fi
+
 _binfmt-host.arm:
 	@ true
 _binfmt-host.aarch64:
@@ -205,18 +220,33 @@ os: $(__DEP_BINFMT) _buildctx
 	$(call show_running_config)
 	$(call say,"Build complete")
 
+docker:
+	[ $(BOARD) = docker ] || exit 1
+	$(eval _image = $(_IMAGES_PREFIX)-result)
+	$(DOCKER) run \
+		--rm \
+		-it \
+		--name $(PROJECT)-$(OS)-$(BOARD)-$(ARCH) \
+		--privileged \
+		$(_image)
 
 _buildctx: | clean base qemu
 	$(eval _init = $(_BUILD_DIR)/stages/__init__/Dockerfile.part)
 	$(call say,"Assembling main Dockerfile")
 	#
 	mkdir -p $(_BUILD_DIR)
-	ln base/$(_OS_BOARD_ARCH).tgz $(_BUILD_DIR)
-	test $(ARCH) = $(__HOST_ARCH) \
-		|| ln qemu/qemu-$(ARCH)-static* $(_BUILD_DIR)
+	if [ $(BOARD) != docker ]; then \
+		ln base/$(_OS_BOARD_ARCH).tgz $(_BUILD_DIR); \
+		test $(ARCH) = $(__HOST_ARCH) \
+			|| ln qemu/qemu-$(ARCH)-static* $(_BUILD_DIR) \
+	; fi
 	#
 	cp -a stages/common $(_BUILD_DIR)/stages
 	cp -a stages/$(OS)/* $(_BUILD_DIR)/stages
+	if [ $(BOARD) = docker ]; then \
+		cp $(_BUILD_DIR)/stages/__init__/docker.Dockerfile.part $(_BUILD_DIR)/stages/__init__/Dockerfile.part \
+		&& cat $(_BUILD_DIR)/stages/__cleanup__/docker.Dockerfile.part >> $(_BUILD_DIR)/stages/__cleanup__/Dockerfile.part \
+	; fi
 	sed -i -e 's|%ADD_BASE_ROOTFS_TGZ%|ADD $(_OS_BOARD_ARCH).tgz /|g' $(_init)
 	test $(ARCH) != $(__HOST_ARCH) \
 		&& sed -i -e 's|%COPY_QEMU_USER_STATIC%|COPY qemu-$(ARCH)-static* /usr/bin/|g' $(_init) \
@@ -236,12 +266,17 @@ _buildctx: | clean base qemu
 
 
 base:
+	if [ $(BOARD) != docker ]; then $(MAKE) base-rootfs; fi
+
+base-rootfs:
 	$(call say,"Ensuring base rootfs")
 	$(MAKE) -C base $(_OS_BOARD_ARCH).tgz
 	$(call say,"Base rootfs is ready")
 
 
-qemu: _qemu-host.$(__HOST_ARCH)
+qemu:
+	if [ $(BOARD) != docker ]; then $(MAKE) _qemu-host.$(__HOST_ARCH); fi
+
 _qemu-host.arm:
 	@ true
 _qemu-host.aarch64:

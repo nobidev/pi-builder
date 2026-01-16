@@ -7,12 +7,17 @@ ENV LC_ALL=en_US.UTF-8
 RUN rm -f /etc/localtime \
 	&& ln -s "/usr/share/zoneinfo/$TIMEZONE" /etc/localtime
 
-RUN sed -i -e "s|^HOOKS=.*|HOOKS=(base udev block filesystems)|g" /etc/mkinitcpio.conf
+RUN pacman --noconfirm --ask=4 -Syu \
+	&& pacman --needed --noconfirm --ask=4 -S mkinitcpio \
+	&& sed -i -e "s|^HOOKS=.*|HOOKS=(base udev block filesystems)|g" /etc/mkinitcpio.conf
 
-RUN cp /etc/pacman.d/mirrorlist /tmp/pacman.mirrorlist.saved \
-	&& echo "Server = $ARCH_DIST_REPO_URL/\$arch/\$repo" > /etc/pacman.d/mirrorlist \
+RUN [ -z "${ARCH_DIST_REPO_URL}" ] \
+		|| ( \
+			cp /etc/pacman.d/mirrorlist /tmp/pacman.mirrorlist.saved \
+			&& echo "Server = $ARCH_DIST_REPO_URL/\$arch/\$repo" > /etc/pacman.d/mirrorlist \
+		) \
 	&& pacman-key --init \
-	&& pacman-key --populate archlinuxarm
+	&& pacman-key --populate archlinux$([ ${BOARD} != docker ] && echo arm)
 
 RUN sed -i -e "s/^CheckSpace/#!!!CheckSpace/g" /etc/pacman.conf
 RUN sed -i -e "s/^#DisableSandbox/DisableSandbox/g" /etc/pacman.conf
@@ -51,9 +56,13 @@ RUN pacman --noconfirm --ask=4 -Syu \
 		bc \
 		screen \
 		dosfstools \
-		raspberrypi-utils \
-		linux-rpi \
-		linux-rpi-headers \
+	&& ( \
+		[ ${BOARD} == docker ] \
+		|| pacman --needed --noconfirm --ask=4 -S \
+			raspberrypi-utils \
+			linux-rpi \
+			linux-rpi-headers \
+		) \
 	&& rm -rf /var/cache/pacman/pkg/*
 
 # https://github.com/pikvm/pikvm/issues/190
@@ -73,6 +82,8 @@ COPY stages/os/fstab /etc/
 COPY stages/os/e2fsck.conf /etc/
 COPY stages/os/eth0.network /etc/systemd/network/
 COPY stages/os/rngd /etc/conf.d/
+
+RUN [ -z "$(getent passwd alarm)" ] && useradd -m alarm
 
 COPY stages/os/gitconfig /etc/skel/.gitconfig
 COPY stages/os/gitconfig /root/.gitconfig

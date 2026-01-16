@@ -1,5 +1,8 @@
 ARG REBUILD
 ENV REBUILD=$REBUILD
 RUN echo $REBUILD
+
+RUN pacman --noconfirm --ask=4 -Syu \
+	&& pacman --needed --noconfirm --ask=4 -S openssh
 RUN rm -f /etc/ssh/ssh_host_*_key* \
 	&& ssh-keygen -A

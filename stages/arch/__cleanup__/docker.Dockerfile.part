@@ -1,0 +1,6 @@
+RUN systemctl mask systemd-firstboot.service
+
+ENV container docker
+CMD [ "/sbin/init" ]
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD systemctl is-system-running | grep -E 'running|degraded' || exit 1
+STOPSIGNAL SIGRTMIN+3

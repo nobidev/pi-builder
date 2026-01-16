@@ -25,3 +25,5 @@ ADD stages/ro/logrotate.override /etc/systemd/system/logrotate.service.d/overrid
 
 COPY stages/ro/ro /usr/local/bin/
 COPY stages/ro/rw /usr/local/bin/
+
+RUN [ ${BOARD} != docker ] || sed -iE 's/^LABEL=/# \0/g' /etc/fstab
